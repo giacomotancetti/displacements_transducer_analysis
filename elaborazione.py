@@ -11,6 +11,7 @@ import datetime
 import matplotlib.pyplot as plt
 import scipy
 import math
+from scipy import stats
 
 def readCsv(folder):
     l_files=[]
@@ -78,73 +79,47 @@ def deltaCalc(df_meas,s_zero,zero_datetime):
     return(df_delta)
     
 # calculate Paerson index
-def PearsonCorr(df_delta):  
-    
+def PearsonCorr(df_delta):    
     # fill na values
     df_delta_fill=df_delta.fillna(method='ffill')
     df_delta_fill=df_delta_fill.drop(df_delta_fill.index[0])
     
-    # no sfasamento
-    d_coeff_Pear_s0={}
-    for i in range(1,len(df_delta_fill.columns),2):
-        T_col=df_delta_fill.columns[i-1]
-        data_col=df_delta_fill.columns[i]
-        
-        data = df_delta_fill[data_col].values.tolist()
-        T=df_delta_fill[T_col].values.tolist()
-        
-        c=scipy.stats.pearsonr(T, data)
-
-        d_coeff_Pear_s0[data_col]=c
-        
-    l_c=[]
-    for key in d_coeff_Pear_s0.keys():
-        l_c.append((1+d_coeff_Pear_s0[key][0])**2)
-        s_0=math.sqrt(sum(l_c)/len(l_c))
-    
-    # sfasamento 1 h
-    d_coeff_Pear_s1={}
-    for i in range(1,len(df_delta_fill.columns),2):
-        T_col=df_delta_fill.columns[i-1]
-        data_col=df_delta_fill.columns[i]
-        
-        data = df_delta_fill[data_col].values.tolist()
-        data_s1=data[1:]
-        T=df_delta_fill[T_col].values.tolist()
-        T_s1=T[:(len(T)-1)]
-        
-        c_1=scipy.stats.pearsonr(T_s1, data_s1)
-
-        d_coeff_Pear_s1[data_col]=c_1
-    
-    l_c=[]
-    for key in d_coeff_Pear_s1.keys():
-        l_c.append((1+d_coeff_Pear_s1[key][0])**2)
-        s_1=math.sqrt(sum(l_c)/len(l_c))
+    # find termical phase shift
+    d_ci={}
+    l_ci_long=[]
+    l_ci_trasv=[]
+    for i in range(0,24):
+        for j in range(1,len(df_delta_fill.columns),2):
             
-    # sfasamento 2 h
-    d_coeff_Pear_s2={}
-    for i in range(1,len(df_delta_fill.columns),2):
-        T_col=df_delta_fill.columns[i-1]
-        data_col=df_delta_fill.columns[i]
-        
-        data = df_delta_fill[data_col].values.tolist()
-        data_s2=data[2:]
-        T=df_delta_fill[T_col].values.tolist()
-        T_s2=T[:(len(T)-2)]
-        
-        c_2=scipy.stats.pearsonr(T_s2, data_s2)
-
-        d_coeff_Pear_s2[data_col]=c_2
-        
-    l_c=[]
-    for key in d_coeff_Pear_s2.keys():
-        l_c.append((1+d_coeff_Pear_s2[key][0])**2)
-        s_2=math.sqrt(sum(l_c)/len(l_c))
+            n_col=df_delta_fill.columns[j]
+            T_col=df_delta_fill.columns[j-1]
+            data_col=df_delta_fill.columns[j]
+            
+            data = df_delta_fill[data_col].values.tolist()
+            data_si=data[i:]
+            T=df_delta_fill[T_col].values.tolist()
+            T_si=T[:(len(T)-i)]
+            
+            c_i=scipy.stats.pearsonr(T_si, data_si)[0]
+            
+            if 'longitudinale' in n_col:
+                l_ci_long.append(c_i)
+            elif 'trasversale' in n_col:
+                l_ci_trasv.append(c_i)
     
-    return(d_coeff_Pear_s1)
+    ci_long=max(l_ci_long,key=abs)
+    shift_long=l_ci_long.index(ci_long)
+    ci_trasv=max(l_ci_trasv,key=abs)
+    shift_trasv=l_ci_trasv.index(ci_trasv)
     
-   
+    for n_col in df_delta_fill.columns:
+        if ('longitudinale') in n_col:
+            d_ci[n_col]=[ci_long,shift_long]
+        elif ('trasversale') in n_col:
+            d_ci[n_col]=[ci_trasv,shift_trasv]
+    
+    return(d_ci)
+    
 def graphDelta(df_delta,d_coeff_Pear):
 
     for i in range(1,len(df_delta.columns),2):
@@ -162,9 +137,12 @@ def graphDelta(df_delta,d_coeff_Pear):
         ax1.tick_params(axis='x',labelsize=10,labelrotation=-90)
         ax1.set_ylim([-5,5])
         
-        textstr='c_Pear='+str(round(d_coeff_Pear[col_data][0],2))
+        textstr='c_Pear_max='+str(round(d_coeff_Pear[col_data][0],2))
+        textstr2='phase_shift='+str(round(d_coeff_Pear[col_data][1],2))+' '+'h'
         
-        ax1.text(0.11, 0.85,'%s'%(textstr),
+        ax1.text(0.11, 0.87,'%s'%(textstr),
+                 transform=ax1.transAxes,fontsize=10,verticalalignment='top')
+        ax1.text(0.11, 0.84,'%s'%(textstr2),
                  transform=ax1.transAxes,fontsize=10,verticalalignment='top')
         
         plt.legend(loc='upper left', bbox_to_anchor=(0.1, 0.95))
@@ -190,16 +168,16 @@ def graphDelta(df_delta,d_coeff_Pear):
                     orientation='landscape', papertype=None, format=None,
                     transparent=False, bbox_inches='tight', pad_inches=None,
                     frameon=None, metadata=None)
-        
+      
 def main():
     folder="./download"
-    zero_datetime=datetime.datetime(2019, 8, 3, 0, 0)
+    zero_datetime=datetime.datetime(2019, 10, 3, 0, 0)
     df_meas=readCsv(folder)
     s_zero=zeroRead(df_meas,zero_datetime)
     df_delta=deltaCalc(df_meas,s_zero,zero_datetime)
     d_coeff_Pear=PearsonCorr(df_delta)
     graphDelta(df_delta,d_coeff_Pear)
-        
+     
 # call the main function
 if __name__ == "__main__":
     main()
